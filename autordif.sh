@@ -21,8 +21,8 @@ GRAY='\033[0;90m'
 # Default States
 SELECTED_EXECUTOR=""
 AUTO_RECONNECT="OFF"
-JOIN_MODE="GAME_ID" # GAME_ID or PRIVATE_SERVER
-GAME_ID="1537690962" # Default Bee Swarm Simulator ID
+JOIN_MODE="GAME_ID"
+GAME_ID="1537690962"
 SERVER_LINK=""
 DISCORD_WEBHOOK=""
 CHECK_INTERVAL=15
@@ -124,9 +124,6 @@ EOF
     fi
 }
 
-# ==========================================
-# AUTO-SCAN ALL PACKAGES (com.roblox.____)
-# ==========================================
 check_root_and_package() {
     echo -e "${BLUE}[*] Checking Root status...${NC}"
     if su -c "id" >/dev/null 2>&1; then
@@ -184,9 +181,7 @@ manage_packages_menu() {
         read -p "Pilih pilihan [1-4]: " m_opt
 
         case $m_opt in
-            1)
-                check_root_and_package
-                ;;
+            1) check_root_and_package ;;
             2)
                 read -p "Masukkan nama pakej baru (contoh: com.roblox.delta): " new_p
                 if [ -n "$new_p" ]; then
@@ -293,9 +288,6 @@ select_executor() {
     esac
 }
 
-# ==========================================
-# MULTI-PACKAGE PROCESS CHECKER & LAUNCHER
-# ==========================================
 is_pkg_running() {
     local pkg="$1"
     if $MODE_ROOT; then
@@ -353,9 +345,6 @@ launch_all_packages() {
     send_discord_log "All packages have been deployed."
 }
 
-# ==========================================
-# BACKGROUND MONITOR WITH STUCK DETECTOR
-# ==========================================
 background_monitor() {
     termux-wake-lock >/dev/null 2>&1
     launch_all_packages
