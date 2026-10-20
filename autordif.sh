@@ -33,7 +33,6 @@ ROBLOX_PACKAGE="com.roblox.client"
 ROBLOX_STATUS="CLOSED"
 START_TIME=0
 ROBLOX_USERNAME="Unknown"
-MONITOR_PID=""
 PID_FILE="$HOME/.autordif_monitor.pid"
 
 # ==========================================
@@ -113,10 +112,36 @@ check_root_and_package() {
         if su -c "pm list packages" | grep -q "$ROBLOX_PACKAGE"; then
             echo -e "${GREEN}[+] Roblox Package Verified via Su.${NC}"
         else
-            echo -e "${RED}[!] Roblox Package Not Found on Device!${NC}"
+            echo -e "${RED}[!] Roblox Package ($ROBLOX_PACKAGE) Not Found on Device!${NC}"
         fi
     else
-        echo -e "${GRAY}[i] Non-Root package verification depends on direct launch test.${NC}"
+        if pm list packages | grep -q "$ROBLOX_PACKAGE"; then
+            echo -e "${GREEN}[+] Package '$ROBLOX_PACKAGE' found on device!${NC}"
+        else
+            echo -e "${RED}[!] Package '$ROBLOX_PACKAGE' not found! Please check/set package manually.${NC}"
+        fi
+    fi
+    sleep 2
+}
+
+# ==========================================
+# MANUAL PACKAGE CONFIGURATOR
+# ==========================================
+set_custom_package() {
+    clear_screen
+    echo -e "${CYAN}=== MANUAL PACKAGE CONFIGURATOR ===${NC}\n"
+    echo -e "Current Targeted Package: ${YELLOW}$ROBLOX_PACKAGE${NC}\n"
+    echo -e "${WHITE}Examples of common packages:${NC}"
+    echo -e "• Standard Roblox : ${GRAY}com.roblox.client${NC}"
+    echo -e "• Delta Executor  : ${GRAY}(Rujuk package APK Delta anda)${NC}"
+    echo -e "• Arceus X        : ${GRAY}(Rujuk package APK Arceus X anda)${NC}\n"
+    
+    read -p "Enter custom package name (or press Enter to keep current): " custom_pkg
+    if [ -n "$custom_pkg" ]; then
+        ROBLOX_PACKAGE="$custom_pkg"
+        echo -e "${GREEN}[+] Targeted package successfully updated to:${NC} $ROBLOX_PACKAGE"
+    else
+        echo -e "${YELLOW}[i] No changes made.${NC}"
     fi
     sleep 2
 }
@@ -146,32 +171,28 @@ apply_system_tweaks() {
 
     case $tweak_opt in
         1)
-            echo -e "${BLUE}[*] Clearing background processes...${NC}"
             su -c "am kill-all"
             echo -e "${GREEN}[+] Background apps cleared.${NC}"
             ;;
         2)
-            echo -e "${BLUE}[*] Dropping RAM Caches...${NC}"
             su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
             echo -e "${GREEN}[+] RAM cache flushed.${NC}"
             ;;
         3)
-            echo -e "${BLUE}[*] Setting OOM adjustment for Roblox...${NC}"
             local pid=$(su -c "pidof $ROBLOX_PACKAGE")
             if [ -n "$pid" ]; then
+                su -c "echo -17 > /proc/$pid/oom_adj"
                 echo -e "${GREEN}[+] Roblox PID $pid protected from auto-kill.${NC}"
             else
                 echo -e "${RED}[!] Roblox is not currently running.${NC}"
             fi
             ;;
         4)
-            echo -e "${BLUE}[*] Adjusting Thermal Parameters...${NC}"
             su -c "stop thermald" >/dev/null 2>&1
             su -c "stop thermal-engine" >/dev/null 2>&1
             echo -e "${GREEN}[+] Thermal throttling services paused.${NC}"
             ;;
         5)
-            echo -e "${BLUE}[*] Applying all System Tweaks...${NC}"
             su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
             su -c "am kill-all"
             echo -e "${GREEN}[+] All system tweaks successfully applied!${NC}"
@@ -218,17 +239,9 @@ select_executor() {
     read -p "Choose Executor (1 or 2): " exec_choice
 
     case $exec_choice in
-        1)
-            SELECTED_EXECUTOR="Delta [KEY]"
-            ;;
-        2)
-            SELECTED_EXECUTOR="ArceusX [KEYLESS]"
-            ;;
-        *)
-            echo -e "${RED}Invalid Choice. Defaulting to Delta.${NC}"
-            SELECTED_EXECUTOR="Delta [KEY]"
-            sleep 1
-            ;;
+        1) SELECTED_EXECUTOR="Delta [KEY]" ;;
+        2) SELECTED_EXECUTOR="ArceusX [KEYLESS]" ;;
+        *) SELECTED_EXECUTOR="Delta [KEY]" ;;
     esac
 }
 
@@ -237,7 +250,7 @@ select_executor() {
 # ==========================================
 launch_roblox() {
     ROBLOX_STATUS="OPENING"
-    send_discord_log "Initiating Roblox Launch. Target: $JOIN_MODE"
+    send_discord_log "Initiating Roblox Launch. Target Package: $ROBLOX_PACKAGE"
     
     if [ "$JOIN_MODE" == "GAME_ID" ]; then
         local launch_url="roblox://placeID=$GAME_ID"
@@ -255,31 +268,24 @@ launch_roblox() {
 
     START_TIME=$(date +%s)
     ROBLOX_STATUS="RUNNING"
-    send_discord_log "Roblox successfully launched and status changed to RUNNING."
+    send_discord_log "Roblox successfully launched using targeted package $ROBLOX_PACKAGE."
 }
 
 is_roblox_running() {
     if $MODE_ROOT; then
         local pids=$(su -c "pidof $ROBLOX_PACKAGE")
-        if [ -n "$pids" ]; then
-            return 0
-        else
-            return 1
-        fi
+        [ -n "$pids" ] && return 0 || return 1
     else
         local check=$(ps aux | grep "$ROBLOX_PACKAGE" | grep -v "grep")
-        if [ -n "$check" ]; then
-            return 0
-        else
-            return 1
-        fi
+        [ -n "$check" ] && return 0 || return 1
     fi
 }
 
 # ==========================================
-# BACKGROUND AUTO-RECONNECT WORKER
+# WAKE LOCK & BACKGROUND WORKER
 # ==========================================
 background_monitor() {
+    termux-wake-lock >/dev/null 2>&1
     launch_roblox
 
     while true; do
@@ -310,10 +316,9 @@ start_background_reconnect() {
         return
     fi
 
-    echo -e "${GREEN}[+] Starting Auto Reconnect in background...${NC}"
+    echo -e "${GREEN}[+] Starting Auto Reconnect & WakeLock in background...${NC}"
     background_monitor &
-    MONITOR_PID=$!
-    echo $MONITOR_PID > "$PID_FILE"
+    echo $! > "$PID_FILE"
     sleep 1
 }
 
@@ -326,6 +331,7 @@ stop_background_reconnect() {
         fi
         rm -f "$PID_FILE"
     fi
+    termux-wake-unlock >/dev/null 2>&1
     ROBLOX_STATUS="CLOSED"
     START_TIME=0
     echo -e "${GREEN}[+] Auto Reconnect has been STOPPED.${NC}"
@@ -334,7 +340,7 @@ stop_background_reconnect() {
 
 is_background_active() {
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
-        echo -e "${GREEN}ACTIVE (Running in Background)${NC}"
+        echo -e "${GREEN}ACTIVE (WakeLock Protected)${NC}"
     else
         echo -e "${RED}INACTIVE (Stopped)${NC}"
     fi
@@ -348,10 +354,11 @@ settings_menu() {
         clear_screen
         echo -e "${CYAN}=== AUTORDIF SETTINGS ===${NC}\n"
         echo -e "1) Recheck Roblox Interval (Current: ${YELLOW}${CHECK_INTERVAL}s${NC})"
-        echo -e "2) Scan Package (Root / Non-Root Status)"
-        echo -e "3) Back to Main Menu"
+        echo -e "2) Set/Scan Targeted Package (Current: ${YELLOW}${ROBLOX_PACKAGE}${NC})"
+        echo -e "3) Scan Package Status (Auto Check)"
+        echo -e "4) Back to Main Menu"
         echo ""
-        read -p "Select option [1-3]: " set_opt
+        read -p "Select option [1-4]: " set_opt
 
         case $set_opt in
             1)
@@ -364,10 +371,9 @@ settings_menu() {
                 fi
                 sleep 1
                 ;;
-            2)
-                check_root_and_package
-                ;;
-            3) break ;;
+            2) set_custom_package ;;
+            3) check_root_and_package ;;
+            4) break ;;
             *) echo -e "${RED}Invalid Selection${NC}"; sleep 1 ;;
         esac
     done
@@ -381,20 +387,19 @@ main_menu() {
         clear_screen
         draw_banner
 
-        # System Header Dashboard
-        echo -e "${WHITE}Date/Time      : ${YELLOW}$(get_current_datetime)${NC}"
-        echo -e "${WHITE}Executor       : ${CYAN}$SELECTED_EXECUTOR${NC}"
-        echo -e "${WHITE}Roblox Status  : ${MAGENTA}$ROBLOX_STATUS${NC}"
-        echo -e "${WHITE}Session Uptime : ${GREEN}$(get_elapsed_time)${NC}"
-        echo -e "${WHITE}Username       : ${BLUE}$ROBLOX_USERNAME${NC}"
-        echo -e "${WHITE}Monitor Worker : $(is_background_active)"
+        echo -e "${WHITE}Date/Time       : ${YELLOW}$(get_current_datetime)${NC}"
+        echo -e "${WHITE}Executor        : ${CYAN}$SELECTED_EXECUTOR${NC}"
+        echo -e "${WHITE}Targeted Package: ${MAGENTA}$ROBLOX_PACKAGE${NC}"
+        echo -e "${WHITE}Roblox Status   : ${MAGENTA}$ROBLOX_STATUS${NC}"
+        echo -e "${WHITE}Session Uptime  : ${GREEN}$(get_elapsed_time)${NC}"
+        echo -e "${WHITE}Username        : ${BLUE}$ROBLOX_USERNAME${NC}"
+        echo -e "${WHITE}Monitor Worker  : $(is_background_active)"
         echo -e "${CYAN}====================================================${NC}\n"
 
-        # Interactive Options
         echo -e " [1] Toggle Auto Reconnect [Current: ${BOLD}${AUTO_RECONNECT}${NC}]"
         echo -e " [2] Configure Server Setup [Mode: ${YELLOW}${JOIN_MODE}${NC}]"
         echo -e " [3] Configure Discord Webhook"
-        echo -e " [4] System Settings (Interval, Root Scan)"
+        echo -e " [4] System Settings (Interval, Targeted Package, Scan)"
         echo -e " [5] System Tweaks (Optimization & Anti-Crash)"
         echo -e " [6] START RECONNECTING (Run in Background)"
         echo -e " [7] STOP RECONNECTING (Kill Background Worker)"
@@ -436,25 +441,16 @@ main_menu() {
                 send_discord_log "AUTORDIF Webhook Integration Active!"
                 sleep 2
                 ;;
-            4)
-                settings_menu
-                ;;
-            5)
-                apply_system_tweaks
-                ;;
-            6)
-                start_background_reconnect
-                sleep 1
-                ;;
-            7)
-                stop_background_reconnect
-                ;;
+            4) settings_menu ;;
+            5) apply_system_tweaks ;;
+            6) start_background_reconnect; sleep 1 ;;
+            7) stop_background_reconnect ;;
             8)
                 read -p "Enter Roblox Username: " rbx_user
                 [ -n "$rbx_user" ] && ROBLOX_USERNAME="$rbx_user"
                 ;;
             9)
-                echo -e "${YELLOW}[!] Exiting menu. (Background workers will continue running if active)${NC}"
+                echo -e "${YELLOW}[!] Exiting menu. (Background workers & WakeLock remain active)${NC}"
                 exit 0
                 ;;
             *)
