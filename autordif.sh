@@ -27,11 +27,14 @@ SERVER_LINK=""
 DISCORD_WEBHOOK=""
 CHECK_INTERVAL=15
 MODE_ROOT=false
-ROBLOX_PACKAGE="com.roblox.client"
+
+# Multi-Package List & Status Tracking Array
+ROBLOX_PACKAGES=("com.roblox.client")
+declare -A PKG_STATUSES
 
 # Force Close / Rejoin Settings
 FORCE_CLOSE_ENABLED="OFF"
-FORCE_CLOSE_INTERVAL=1800 # Default 1800 saat (30 minit)
+FORCE_CLOSE_INTERVAL=1800
 
 # Runtime Tracking Variables
 START_TIME=0
@@ -56,7 +59,7 @@ draw_banner() {
     echo " ██║  ██║╚██████╔╝   ██║   ██║  ██║██████╔╝██║██║     "
     echo " ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝     "
     echo -e "${NC}"
-    echo -e "${YELLOW}${BOLD}           ---> AUTO RECONNECT BY DIF <---          ${NC}"
+    echo -e "${YELLOW}${BOLD}      ---> MULTI-ACCOUNT AUTO RECONNECT <---      ${NC}"
     echo -e "${CYAN}====================================================${NC}"
     echo ""
 }
@@ -90,15 +93,21 @@ get_status() {
     fi
 }
 
+set_pkg_status() {
+    local pkg="$1"
+    local stat="$2"
+    PKG_STATUSES["$pkg"]="$stat"
+}
+
 send_discord_log() {
     local message="$1"
     if [ -n "$DISCORD_WEBHOOK" ]; then
         local payload=$(cat <<EOF
 {
-  "username": "AUTORDIF Bot",
+  "username": "AUTORDIF Multi-Bot",
   "embeds": [
     {
-      "title": "AUTORDIF Monitor Notification",
+      "title": "Multi-Account Notification",
       "description": "$message",
       "color": 3447003,
       "footer": {
@@ -123,36 +132,66 @@ check_root_and_package() {
         echo -e "${YELLOW}[!] Root Access Not Detected (Running in Non-Root mode).${NC}"
     fi
 
-    echo -e "${BLUE}[*] Scanning Targeted Package ($ROBLOX_PACKAGE)...${NC}"
-    if $MODE_ROOT; then
-        if su -c "pm list packages" | grep -q "$ROBLOX_PACKAGE"; then
-            echo -e "${GREEN}[+] Package Verified via Su.${NC}"
-        else
-            echo -e "${RED}[!] Package ($ROBLOX_PACKAGE) Not Found!${NC}"
-        fi
-    else
-        if pm list packages 2>/dev/null | grep -q "$ROBLOX_PACKAGE"; then
-            echo -e "${GREEN}[+] Package '$ROBLOX_PACKAGE' found on device!${NC}"
-        else
-            echo -e "${YELLOW}[!] Standard check restricted. Using deep activity scanner for Non-Root.${NC}"
-        fi
-    fi
+    echo -e "${BLUE}[*] Scanning All Targeted Packages...${NC}"
+    for pkg in "${ROBLOX_PACKAGES[@]}"; do
+        echo -e "${GRAY} - Checking package: $pkg${NC}"
+        set_pkg_status "$pkg" "STANDBY"
+    done
     sleep 2
 }
 
-set_custom_package() {
-    clear_screen
-    echo -e "${CYAN}=== MANUAL PACKAGE CONFIGURATOR ===${NC}\n"
-    echo -e "Current Targeted Package: ${YELLOW}$ROBLOX_PACKAGE${NC}\n"
-    
-    read -p "Enter custom package name (or press Enter to keep current): " custom_pkg
-    if [ -n "$custom_pkg" ]; then
-        ROBLOX_PACKAGE="$custom_pkg"
-        echo -e "${GREEN}[+] Targeted package updated to:${NC} $ROBLOX_PACKAGE"
-    else
-        echo -e "${YELLOW}[i] No changes made.${NC}"
-    fi
-    sleep 2
+manage_packages_menu() {
+    while true; do
+        clear_screen
+        echo -e "${CYAN}=== MULTI-PACKAGE MANAGER ===${NC}\n"
+        echo -e "Senarai Package Semasa:"
+        local idx=1
+        for pkg in "${ROBLOX_PACKAGES[@]}"; do
+            echo -e " ${YELLOW}[$idx]${NC} $pkg"
+            ((idx++))
+        done
+        echo ""
+        echo -e "1) Tambah Package Baru"
+        echo -e "2) Buang / Remove Package (ikut Nombor)"
+        echo -e "3) Tetapkan Semula kepada Default (com.roblox.client)"
+        echo -e "4) Kembali"
+        echo ""
+        read -p "Pilih pilihan [1-4]: " m_opt
+
+        case $m_opt in
+            1)
+                read -p "Masukkan nama package baru (contoh: com.roblox.client2): " new_p
+                if [ -n "$new_p" ]; then
+                    ROBLOX_PACKAGES+=("$new_p")
+                    set_pkg_status "$new_p" "STANDBY"
+                    echo -e "${GREEN}[+] Package berjaya ditambah!${NC}"
+                fi
+                sleep 1
+                ;;
+            2)
+                read -p "Masukkan nombor package yang hendak dibuang: " del_idx
+                if [[ "$del_idx" =~ ^[0-9]+$ ]] && [ "$del_idx" -ge 1 ] && [ "$del_idx" -le "${#ROBLOX_PACKAGES[@]}" ]; then
+                    local target_pkg="${ROBLOX_PACKAGES[del_idx-1]}"
+                    unset 'ROBLOX_PACKAGES[del_idx-1]'
+                    ROBLOX_PACKAGES=("${ROBLOX_PACKAGES[@]}")
+                    unset 'PKG_STATUSES[$target_pkg]'
+                    echo -e "${GREEN}[+] Package $target_pkg berjaya dibuang!${NC}"
+                else
+                    echo -e "${RED}[!] Nombor tidak sah.${NC}"
+                fi
+                sleep 1
+                ;;
+            3)
+                ROBLOX_PACKAGES=("com.roblox.client")
+                PKG_STATUSES=()
+                set_pkg_status "com.roblox.client" "STANDBY"
+                echo -e "${YELLOW}[i] Package dikembalikan kepada default.${NC}"
+                sleep 1
+                ;;
+            4) break ;;
+            *) echo -e "${RED}Pilihan tidak sah!${NC}"; sleep 1 ;;
+        esac
+    done
 }
 
 apply_system_tweaks() {
@@ -167,7 +206,7 @@ apply_system_tweaks() {
 
     echo -e "${CYAN}[1] Force Stop Background Apps${NC}"
     echo -e "${CYAN}[2] Clear Cache Memory (RAM Optimization)${NC}"
-    echo -e "${CYAN}[3] Apply LMK Protection for Roblox${NC}"
+    echo -e "${CYAN}[3] Apply LMK Protection for All Roblox Packages${NC}"
     echo -e "${CYAN}[4] Back${NC}"
     echo ""
     read -p "Select option [1-4]: " tweak_opt
@@ -176,13 +215,16 @@ apply_system_tweaks() {
         1) su -c "am kill-all"; echo -e "${GREEN}[+] Background apps cleared.${NC}" ;;
         2) su -c "sync; echo 3 > /proc/sys/vm/drop_caches"; echo -e "${GREEN}[+] RAM cache flushed.${NC}" ;;
         3)
-            local pid=$(su -c "pidof $ROBLOX_PACKAGE")
-            if [ -n "$pid" ]; then
-                su -c "echo -17 > /proc/$pid/oom_adj"
-                echo -e "${GREEN}[+] Process PID $pid protected.${NC}"
-            else
-                echo -e "${RED}[!] Roblox is not currently running.${NC}"
-            fi
+            for pkg in "${ROBLOX_PACKAGES[@]}"; do
+                local pid=$(su -c "pidof $pkg")
+                if [ -n "$pid" ]; then
+                    su -c "echo -17 > /proc/$pid/oom_adj"
+                    echo -e "${GREEN}[+] Process $pkg (PID $pid) protected.${NC}"
+                else
+                    echo -e "${YELLOW}[!] Package $pkg tidak aktif.${NC}"
+                fi
+            done
+            sleep 2
             ;;
         4) return ;;
         *) echo -e "${RED}Invalid choice!${NC}" ;;
@@ -230,30 +272,29 @@ select_executor() {
 }
 
 # ==========================================
-# ADVANCED PROCESS DETECTOR
+# MULTI-PACKAGE PROCESS CHECKER & LAUNCHER
 # ==========================================
-is_roblox_running() {
+is_pkg_running() {
+    local pkg="$1"
     if $MODE_ROOT; then
-        local pids=$(su -c "pidof $ROBLOX_PACKAGE")
+        local pids=$(su -c "pidof $pkg")
         [ -n "$pids" ] && return 0 || return 1
     else
-        if pidof "$ROBLOX_PACKAGE" >/dev/null 2>&1 || pgrep -f "$ROBLOX_PACKAGE" >/dev/null 2>&1; then
+        if pidof "$pkg" >/dev/null 2>&1 || pgrep -f "$pkg" >/dev/null 2>&1; then
             return 0
         fi
-        if dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | grep -q "$ROBLOX_PACKAGE"; then
+        if dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | grep -q "$pkg"; then
             return 0
         fi
-        local ps_check=$(ps -ef 2>/dev/null | grep "$ROBLOX_PACKAGE" | grep -v "grep")
-        if [ -n "$ps_check" ]; then
-            return 0
-        fi
-        return 1
+        local ps_check=$(ps -ef 2>/dev/null | grep "$pkg" | grep -v "grep")
+        [ -n "$ps_check" ] && return 0 || return 1
     fi
 }
 
-launch_roblox() {
-    set_status "RECONNECTING"
-    send_discord_log "Initiating Roblox Launch. Target Package: $ROBLOX_PACKAGE"
+launch_specific_pkg() {
+    local pkg="$1"
+    set_pkg_status "$pkg" "OPENING ROBLOX"
+    send_discord_log "Launching specific package: $pkg"
     
     if [ "$JOIN_MODE" == "GAME_ID" ]; then
         local launch_url="roblox://placeID=$GAME_ID"
@@ -262,24 +303,42 @@ launch_roblox() {
     fi
 
     if $MODE_ROOT; then
-        su -c "am force-stop $ROBLOX_PACKAGE" >/dev/null 2>&1
-        su -c "am start -a android.intent.action.VIEW -d '$launch_url' $ROBLOX_PACKAGE" >/dev/null 2>&1
+        su -c "am start -a android.intent.action.VIEW -d '$launch_url' $pkg" >/dev/null 2>&1
     else
-        am force-stop "$ROBLOX_PACKAGE" >/dev/null 2>&1
-        am start -a android.intent.action.VIEW -d "$launch_url" "$ROBLOX_PACKAGE" >/dev/null 2>&1
+        am start -a android.intent.action.VIEW -d "$launch_url" "$pkg" >/dev/null 2>&1
     fi
+
+    sleep 3
+    set_pkg_status "$pkg" "RUNNING"
+}
+
+launch_all_packages() {
+    set_status "RECONNECTING"
+    send_discord_log "Initiating launch for all ${#ROBLOX_PACKAGES[@]} targeted packages."
+    
+    for pkg in "${ROBLOX_PACKAGES[@]}"; do
+        set_pkg_status "$pkg" "RECONNECTING"
+        if $MODE_ROOT; then
+            su -c "am force-stop $pkg" >/dev/null 2>&1
+        else
+            am force-stop "$pkg" >/dev/null 2>&1
+        fi
+        sleep 1
+        launch_specific_pkg "$pkg"
+        sleep 2
+    done
 
     START_TIME=$(date +%s)
     set_status "RUNNING"
-    send_discord_log "Roblox launched using package $ROBLOX_PACKAGE."
+    send_discord_log "All packages have been deployed."
 }
 
 # ==========================================
-# BACKGROUND MONITOR WITH FORCE CLOSE TIMER
+# BACKGROUND MONITOR (PER-PACKAGE CHECK)
 # ==========================================
 background_monitor() {
     termux-wake-lock >/dev/null 2>&1
-    launch_roblox
+    launch_all_packages
 
     local last_rejoin_time=$(date +%s)
 
@@ -287,28 +346,41 @@ background_monitor() {
         sleep "$CHECK_INTERVAL"
         local current_time=$(date +%s)
 
-        # Semakan Timer Force Close Scheduled Rejoin
         if [ "$FORCE_CLOSE_ENABLED" == "ON" ]; then
             local time_diff=$((current_time - last_rejoin_time))
             if [ "$time_diff" -ge "$FORCE_CLOSE_INTERVAL" ]; then
                 set_status "FORCE CLOSING (STUCK)"
-                send_discord_log "SCHEDULED FORCE CLOSE! Rejoining Roblox after $FORCE_CLOSE_INTERVAL seconds..."
+                send_discord_log "Scheduled Force Close triggered. Restarting all accounts..."
                 sleep 2
-                launch_roblox
+                launch_all_packages
                 last_rejoin_time=$(date +%s)
                 continue
             fi
         fi
 
-        # Semakan Crash biasa
-        if is_roblox_running; then
-            set_status "RUNNING"
-        else
-            set_status "CRASHED"
-            send_discord_log "CRASH DETECTED! Roblox process died. Reconnecting..."
-            sleep 3
-            launch_roblox
+        local all_crashed=true
+        local any_action_taken=false
+
+        for pkg in "${ROBLOX_PACKAGES[@]}"; do
+            if is_pkg_running "$pkg"; then
+                all_crashed=false
+                set_pkg_status "$pkg" "RUNNING"
+            else
+                set_pkg_status "$pkg" "CRASHED"
+                send_discord_log "CRASH DETECTED on package: $pkg. Reconnecting this specific account..."
+                launch_specific_pkg "$pkg"
+                any_action_taken=true
+                sleep 2
+            fi
+        done
+
+        if "$all_crashed"; then
+            set_status "ALL CRASHED"
+            send_discord_log "All packages crashed! Re-launching everything..."
+            launch_all_packages
             last_rejoin_time=$(date +%s)
+        elif ! "$any_action_taken"; then
+            set_status "RUNNING"
         fi
     done
 }
@@ -326,7 +398,9 @@ start_background_reconnect() {
         return
     fi
 
-    echo -e "${GREEN}[+] Starting Auto Reconnect in background...${NC}"
+    # Paksa aktifkan wake lock serta-merta
+    termux-wake-lock >/dev/null 2>&1
+    echo -e "${GREEN}[+] Starting Multi-Account Auto Reconnect & Wake Lock...${NC}"
     background_monitor &
     echo $! > "$PID_FILE"
     sleep 1
@@ -343,8 +417,11 @@ stop_background_reconnect() {
     fi
     termux-wake-unlock >/dev/null 2>&1
     set_status "CLOSED"
+    for pkg in "${ROBLOX_PACKAGES[@]}"; do
+        set_pkg_status "$pkg" "CLOSED"
+    done
     START_TIME=0
-    echo -e "${GREEN}[+] Auto Reconnect has been STOPPED.${NC}"
+    echo -e "${GREEN}[+] Auto Reconnect has been STOPPED & Wake Lock released.${NC}"
     sleep 1
 }
 
@@ -356,56 +433,55 @@ is_background_active() {
     fi
 }
 
-# ==========================================
-# SETTINGS MENU (WITH FORCE CLOSE SETUP)
-# ==========================================
 settings_menu() {
     while true; do
         clear_screen
         echo -e "${CYAN}=== AUTORDIF SETTINGS ===${NC}\n"
-        echo -e "1) Recheck Roblox Interval (Current: ${YELLOW}${CHECK_INTERVAL}s${NC})"
-        echo -e "2) Set/Scan Targeted Package (Current: ${YELLOW}${ROBLOX_PACKAGE}${NC})"
+        echo -e "1) Recheck Interval (Current: ${YELLOW}${CHECK_INTERVAL}s${NC})"
+        echo -e "2) Manage Multi-Packages (Jumlah: ${YELLOW}$([[ ${#ROBLOX_PACKAGES[@]} ]] && echo ${#ROBLOX_PACKAGES[@]})${NC})"
         echo -e "3) Toggle Scheduled Force Close [Current: ${BOLD}${FORCE_CLOSE_ENABLED}${NC}]"
         echo -e "4) Set Force Close Interval (Current: ${YELLOW}${FORCE_CLOSE_INTERVAL}s${NC})"
-        echo -e "5) Scan Package Status (Auto Check)"
-        echo -e "6) Back to Main Menu"
+        echo -e "5) Manual Toggle Termux Wake Lock (ON/OFF)"
+        echo -e "6) Scan Package Status (Auto Check)"
+        echo -e "7) Back to Main Menu"
         echo ""
-        read -p "Select option [1-6]: " set_opt
+        read -p "Select option [1-7]: " set_opt
 
         case $set_opt in
             1)
                 read -p "Enter interval in seconds: " new_int
-                if [[ "$new_int" =~ ^[0-9]+$ ]]; then
-                    CHECK_INTERVAL=$new_int
-                    echo -e "${GREEN}[+] Check Interval updated!${NC}"
-                else
-                    echo -e "${RED}[!] Invalid integer input.${NC}"
-                fi
+                [[ "$new_int" =~ ^[0-9]+$ ]] && CHECK_INTERVAL=$new_int
                 sleep 1
                 ;;
-            2) set_custom_package ;;
+            2) manage_packages_menu ;;
             3)
                 if [ "$FORCE_CLOSE_ENABLED" == "OFF" ]; then
                     FORCE_CLOSE_ENABLED="ON"
-                    echo -e "${GREEN}[+] Scheduled Force Close ENABLED!${NC}"
                 else
                     FORCE_CLOSE_ENABLED="OFF"
-                    echo -e "${YELLOW}[!] Scheduled Force Close DISABLED!${NC}"
                 fi
                 sleep 1
                 ;;
             4)
-                read -p "Enter Force Close Interval in seconds (e.g., 1800 for 30m): " fc_int
-                if [[ "$fc_int" =~ ^[0-9]+$ ]]; then
-                    FORCE_CLOSE_INTERVAL=$fc_int
-                    echo -e "${GREEN}[+] Force Close Interval updated to ${FORCE_CLOSE_INTERVAL}s!${NC}"
-                else
-                    echo -e "${RED}[!] Invalid integer input.${NC}"
+                read -p "Enter Force Close Interval in seconds: " fc_int
+                [[ "$fc_int" =~ ^[0-9]+$ ]] && FORCE_CLOSE_INTERVAL=$fc_int
+                sleep 1
+                ;;
+            5)
+                echo -e "${CYAN}1) Turn ON Wake Lock${NC}"
+                echo -e "${CYAN}2) Turn OFF Wake Lock${NC}"
+                read -p "Pilihan [1-2]: " wl_choice
+                if [ "$wl_choice" == "1" ]; then
+                    termux-wake-lock >/dev/null 2>&1
+                    echo -e "${GREEN}[+] Termux Wake Lock ACTIVATED manually!${NC}"
+                elif [ "$wl_choice" == "2" ]; then
+                    termux-wake-unlock >/dev/null 2>&1
+                    echo -e "${YELLOW}[!] Termux Wake Lock RELEASED manually!${NC}"
                 fi
                 sleep 1
                 ;;
-            5) check_root_and_package ;;
-            6) break ;;
+            6) check_root_and_package ;;
+            7) break ;;
             *) echo -e "${RED}Invalid Selection${NC}"; sleep 1 ;;
         esac
     done
@@ -420,42 +496,46 @@ main_menu() {
 
         echo -e "${WHITE}Date/Time       : ${YELLOW}$(get_current_datetime)${NC}"
         echo -e "${WHITE}Executor        : ${CYAN}$SELECTED_EXECUTOR${NC}"
-        echo -e "${WHITE}Targeted Package: ${MAGENTA}$ROBLOX_PACKAGE${NC}"
+        echo -e "${WHITE}Active Accounts : ${MAGENTA}$([[ ${#ROBLOX_PACKAGES[@]} ]] && echo ${#ROBLOX_PACKAGES[@]})${NC}"
         
-        # Color-Coded Status Display
         if [ "$current_status" == "RUNNING" ]; then
             echo -e "${WHITE}Roblox Status   : ${GREEN}$current_status${NC}"
-        elif [ "$current_status" == "CRASHED" ]; then
+        elif [[ "$current_status" == *"CRASHED"* ]]; then
             echo -e "${WHITE}Roblox Status   : ${RED}$current_status${NC}"
-        elif [ "$current_status" == "RECONNECTING" ]; then
-            echo -e "${WHITE}Roblox Status   : ${YELLOW}$current_status${NC}"
-        elif [ "$current_status" == "FORCE CLOSING (STUCK)" ]; then
-            echo -e "${WHITE}Roblox Status   : ${RED}${BOLD}$current_status${NC}"
         else
-            echo -e "${WHITE}Roblox Status   : ${MAGENTA}$current_status${NC}"
+            echo -e "${WHITE}Roblox Status   : ${YELLOW}$current_status${NC}"
         fi
 
-        echo -e "${WHITE}Scheduled Rejoin: ${YELLOW}${FORCE_CLOSE_ENABLED} (${FORCE_CLOSE_INTERVAL}s)${NC}"
         echo -e "${WHITE}Session Uptime  : ${GREEN}$(get_elapsed_time)${NC}"
         echo -e "${WHITE}Username        : ${BLUE}$ROBLOX_USERNAME${NC}"
         echo -e "${WHITE}Monitor Worker  : $(is_background_active)"
-        echo -e "${CYAN}====================================================${NC}\n"
+        echo -e "${CYAN}====================================================${NC}"
+
+        # LIVE PACKAGE STATUS BOX DI BAWAH MENU
+        echo -e "${YELLOW}${BOLD}┌──────────────── LIVE PACKAGE STATUS ──────────────┐${NC}"
+        for pkg in "${ROBLOX_PACKAGES[@]}"; do
+            local p_stat="${PKG_STATUSES[$pkg]:-STANDBY}"
+            local color_stat="${GREEN}"
+            if [ "$p_stat" == "CRASHED" ]; then
+                color_stat="${RED}"
+            elif [ "$p_stat" == "RECONNECTING" ] || [ "$p_stat" == "OPENING ROBLOX" ]; then
+                color_stat="${YELLOW}"
+            fi
+            printf "${YELLOW}│${NC} %-30s : ${color_stat}%-14s${NC} ${YELLOW}│${NC}\n" "$pkg" "$p_stat"
+        done
+        echo -e "${YELLOW}${BOLD}└───────────────────────────────────────────────────┘${NC}\n"
 
         echo -e " [1] Toggle Auto Reconnect [Current: ${BOLD}${AUTO_RECONNECT}${NC}]"
         echo -e " [2] Configure Server Setup [Mode: ${YELLOW}${JOIN_MODE}${NC}]"
         echo -e " [3] Configure Discord Webhook"
-        echo -e " [4] System Settings (Interval, Force Close, Package)"
-        echo -e " [5] System Tweaks (Optimization & Anti-Crash)"
+        echo -e " [4] System Settings (Interval, Multi-Packages, Wake Lock)"
+        echo -e " [5] System Tweaks (Optimization)"
         echo -e " [6] START RECONNECTING (Run in Background)"
         echo -e " [7] STOP RECONNECTING (Kill Background Worker)"
         echo -e " [8] Set Roblox Username"
         echo -e " [9] Exit"
         echo ""
-        read -t 2 -p "Select Command [1-9]: " choice
-
-        if [ $? -ne 0 ]; then
-            continue
-        fi
+        read -p "Select Command [1-9]: " choice
 
         case $choice in
             1)
@@ -486,8 +566,8 @@ main_menu() {
                 echo -e "${CYAN}=== DISCORD WEBHOOK SETUP ===${NC}"
                 read -p "Paste Webhook URL: " wh_url
                 DISCORD_WEBHOOK="$wh_url"
-                echo -e "${GREEN}[+] Webhook saved! Testing connection...${NC}"
-                send_discord_log "AUTORDIF Webhook Integration Active!"
+                echo -e "${GREEN}[+] Webhook saved!${NC}"
+                send_discord_log "AUTORDIF Multi-Account Webhook Active!"
                 sleep 2
                 ;;
             4) settings_menu ;;
