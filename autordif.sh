@@ -26,7 +26,6 @@ GAME_ID="1537690962" # Default Bee Swarm Simulator ID
 SERVER_LINK=""
 DISCORD_WEBHOOK=""
 CHECK_INTERVAL=15
-AUTOEXE_PATH=""
 MODE_ROOT=false
 ROBLOX_PACKAGE="com.roblox.client"
 
@@ -34,6 +33,8 @@ ROBLOX_PACKAGE="com.roblox.client"
 ROBLOX_STATUS="CLOSED"
 START_TIME=0
 ROBLOX_USERNAME="Unknown"
+MONITOR_PID=""
+PID_FILE="$HOME/.autordif_monitor.pid"
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -232,69 +233,6 @@ select_executor() {
 }
 
 # ==========================================
-# SMART AUTOEXEC MANAGER (GITHUB STYLE)
-# ==========================================
-setup_autoexe() {
-    clear_screen
-    echo -e "${CYAN}=== SMART AUTOEXEC MANAGER ===${NC}\n"
-    echo -e "${BLUE}[*] Scanning common executor directories (Delta / ArceusX)...${NC}"
-    
-    # Common Android storage paths for executors
-    local possible_paths=(
-        "/sdcard/Download/Delta/autoexec"
-        "/sdcard/Delta/autoexec"
-        "/sdcard/ArceusX/autoexec"
-        "/sdcard/Android/data/com.roblox.client/files"
-        "$HOME/.autordif_scripts"
-    )
-
-    local target_dir=""
-    for path in "${possible_paths[@]}"; do
-        if [ -d "$path" ] || mkdir -p "$path" 2>/dev/null; then
-            target_dir="$path"
-            break
-        fi
-    done
-
-    # Fallback if external storage fails
-    if [ -z "$target_dir" ]; then
-        target_dir="$HOME"
-    fi
-
-    echo -e "${GREEN}[+] Target Directory Found/Created:${NC} $target_dir"
-    echo -e "Current AutoExe File: ${YELLOW}${AUTOEXE_PATH:-None}${NC}\n"
-    
-    echo -e "${WHITE}Instruction:${NC}"
-    echo "• Type or paste your Lua script below, then press Enter twice / finish input."
-    echo "• OR just press [ENTER] directly without typing anything to skip and return to menu.\n"
-    
-    read -p "Enter custom script name (e.g., bee_swarm_macro.lua): " script_filename
-    
-    if [ -z "$script_filename" ]; then
-        echo -e "${YELLOW}[i] Skipped. Returning to menu...${NC}"
-        sleep 1
-        return
-    fi
-
-    AUTOEXE_PATH="$target_dir/$script_filename"
-    echo -e "${CYAN}Paste your Lua script content below (Press Ctrl+D when finished typing):${NC}"
-    echo "--------------------------------------------------------"
-    
-    # Capture multiline input until EOF (Ctrl+D)
-    cat > "$AUTOEXE_PATH"
-    
-    echo -e "\n--------------------------------------------------------"
-    if [ -s "$AUTOEXE_PATH" ]; then
-        echo -e "${GREEN}[+] Autoexec script successfully saved to:${NC} $AUTOEXE_PATH"
-    else
-        echo -e "${YELLOW}[!] File created but empty. Autoexec unassigned.${NC}"
-        rm -f "$AUTOEXE_PATH"
-        AUTOEXE_PATH=""
-    fi
-    sleep 2
-}
-
-# ==========================================
 # ROBLOX LAUNCHER & CONTROLLER
 # ==========================================
 launch_roblox() {
@@ -307,11 +245,11 @@ launch_roblox() {
         local launch_url="$SERVER_LINK"
     fi
 
-    echo -e "${BLUE}[*] Launching Roblox via Intent URL...${NC}"
-    
     if $MODE_ROOT; then
+        su -c "am force-stop $ROBLOX_PACKAGE" >/dev/null 2>&1
         su -c "am start -a android.intent.action.VIEW -d '$launch_url' $ROBLOX_PACKAGE" >/dev/null 2>&1
     else
+        am force-stop $ROBLOX_PACKAGE >/dev/null 2>&1
         am start -a android.intent.action.VIEW -d "$launch_url" >/dev/null 2>&1
     fi
 
@@ -339,49 +277,67 @@ is_roblox_running() {
 }
 
 # ==========================================
-# MAIN AUTO-RECONNECT LOOP
+# BACKGROUND AUTO-RECONNECT WORKER
 # ==========================================
-start_auto_reconnect_loop() {
-    if [ "$AUTO_RECONNECT" == "OFF" ]; then
-        echo -e "${RED}[!] Please enable Auto Reconnect setting first!${NC}"
-        sleep 2
-        return
-    fi
-
+background_monitor() {
     launch_roblox
 
-    clear_screen
-    echo -e "${GREEN}[+] Auto Reconnect System Active. Press [CTRL + C] to return to Main Menu.${NC}\n"
-
-    trap 'echo -e "\n${YELLOW}[!] Stopping Monitor Loop...${NC}"; sleep 1; return' INT
-
     while true; do
-        clear_screen
-        draw_banner
-        echo -e "${WHITE}Current Time: $(get_current_datetime)${NC}"
-        echo -e "${CYAN}----------------------------------------------------${NC}"
-        echo -e "Status            : ${MAGENTA}$ROBLOX_STATUS${NC}"
-        echo -e "Uptime Tracker    : ${GREEN}$(get_elapsed_time)${NC}"
-        echo -e "Roblox Account    : ${YELLOW}$ROBLOX_USERNAME${NC}"
-        echo -e "Active Executor   : ${BLUE}$SELECTED_EXECUTOR${NC}"
-        echo -e "AutoExe Active    : ${GRAY}${AUTOEXE_PATH:-None}${NC}"
-        echo -e "${CYAN}----------------------------------------------------${NC}"
-        echo -e "${GRAY}Monitoring active. Rechecking in $CHECK_INTERVAL seconds...${NC}"
+        sleep "$CHECK_INTERVAL"
 
         if is_roblox_running; then
             ROBLOX_STATUS="RUNNING"
         else
             ROBLOX_STATUS="CRASHED"
             send_discord_log "CRASH DETECTED! Roblox process died. Reconnecting..."
-            
-            echo -e "\n${RED}[!] Roblox Crash Detected! Reconnecting in 5 seconds...${NC}"
             ROBLOX_STATUS="RECONNECTING"
-            sleep 5
+            sleep 3
             launch_roblox
         fi
-
-        sleep "$CHECK_INTERVAL"
     done
+}
+
+start_background_reconnect() {
+    if [ "$AUTO_RECONNECT" == "OFF" ]; then
+        echo -e "${RED}[!] Please enable Auto Reconnect setting first! (Option 1)${NC}"
+        sleep 2
+        return
+    fi
+
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        echo -e "${YELLOW}[!] Auto Reconnect is already running in background!${NC}"
+        sleep 2
+        return
+    fi
+
+    echo -e "${GREEN}[+] Starting Auto Reconnect in background...${NC}"
+    background_monitor &
+    MONITOR_PID=$!
+    echo $MONITOR_PID > "$PID_FILE"
+    sleep 1
+}
+
+stop_background_reconnect() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" >/dev/null 2>&1
+            pkill -P "$pid" >/dev/null 2>&1
+        fi
+        rm -f "$PID_FILE"
+    fi
+    ROBLOX_STATUS="CLOSED"
+    START_TIME=0
+    echo -e "${GREEN}[+] Auto Reconnect has been STOPPED.${NC}"
+    sleep 1
+}
+
+is_background_active() {
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        echo -e "${GREEN}ACTIVE (Running in Background)${NC}"
+    else
+        echo -e "${RED}INACTIVE (Stopped)${NC}"
+    fi
 }
 
 # ==========================================
@@ -392,11 +348,10 @@ settings_menu() {
         clear_screen
         echo -e "${CYAN}=== AUTORDIF SETTINGS ===${NC}\n"
         echo -e "1) Recheck Roblox Interval (Current: ${YELLOW}${CHECK_INTERVAL}s${NC})"
-        echo -e "2) Auto-Execute Script Setup (Scan & Write Script)"
-        echo -e "3) Scan Package (Root / Non-Root Status)"
-        echo -e "4) Back to Main Menu"
+        echo -e "2) Scan Package (Root / Non-Root Status)"
+        echo -e "3) Back to Main Menu"
         echo ""
-        read -p "Select option [1-4]: " set_opt
+        read -p "Select option [1-3]: " set_opt
 
         case $set_opt in
             1)
@@ -410,12 +365,9 @@ settings_menu() {
                 sleep 1
                 ;;
             2)
-                setup_autoexe
-                ;;
-            3)
                 check_root_and_package
                 ;;
-            4) break ;;
+            3) break ;;
             *) echo -e "${RED}Invalid Selection${NC}"; sleep 1 ;;
         esac
     done
@@ -430,24 +382,26 @@ main_menu() {
         draw_banner
 
         # System Header Dashboard
-        echo -e "${WHITE}Date/Time     : ${YELLOW}$(get_current_datetime)${NC}"
-        echo -e "${WHITE}Executor      : ${CYAN}$SELECTED_EXECUTOR${NC}"
-        echo -e "${WHITE}Roblox Status : ${MAGENTA}$ROBLOX_STATUS${NC}"
-        echo -e "${WHITE}Session Uptime: ${GREEN}$(get_elapsed_time)${NC}"
-        echo -e "${WHITE}Username      : ${BLUE}$ROBLOX_USERNAME${NC}"
+        echo -e "${WHITE}Date/Time      : ${YELLOW}$(get_current_datetime)${NC}"
+        echo -e "${WHITE}Executor       : ${CYAN}$SELECTED_EXECUTOR${NC}"
+        echo -e "${WHITE}Roblox Status  : ${MAGENTA}$ROBLOX_STATUS${NC}"
+        echo -e "${WHITE}Session Uptime : ${GREEN}$(get_elapsed_time)${NC}"
+        echo -e "${WHITE}Username       : ${BLUE}$ROBLOX_USERNAME${NC}"
+        echo -e "${WHITE}Monitor Worker : $(is_background_active)"
         echo -e "${CYAN}====================================================${NC}\n"
 
         # Interactive Options
         echo -e " [1] Toggle Auto Reconnect [Current: ${BOLD}${AUTO_RECONNECT}${NC}]"
         echo -e " [2] Configure Server Setup [Mode: ${YELLOW}${JOIN_MODE}${NC}]"
         echo -e " [3] Configure Discord Webhook"
-        echo -e " [4] System Settings (Interval, AutoExe, Root Scan)"
+        echo -e " [4] System Settings (Interval, Root Scan)"
         echo -e " [5] System Tweaks (Optimization & Anti-Crash)"
-        echo -e " [6] START AUTO REJOIN / LAUNCH ROBLOX"
-        echo -e " [7] Set Roblox Username"
-        echo -e " [8] Exit"
+        echo -e " [6] START RECONNECTING (Run in Background)"
+        echo -e " [7] STOP RECONNECTING (Kill Background Worker)"
+        echo -e " [8] Set Roblox Username"
+        echo -e " [9] Exit"
         echo ""
-        read -p "Select Command [1-8]: " choice
+        read -p "Select Command [1-9]: " choice
 
         case $choice in
             1)
@@ -489,14 +443,18 @@ main_menu() {
                 apply_system_tweaks
                 ;;
             6)
-                start_auto_reconnect_loop
+                start_background_reconnect
+                sleep 1
                 ;;
             7)
+                stop_background_reconnect
+                ;;
+            8)
                 read -p "Enter Roblox Username: " rbx_user
                 [ -n "$rbx_user" ] && ROBLOX_USERNAME="$rbx_user"
                 ;;
-            8)
-                echo -e "${GREEN}Thank you for using AUTORDIF! Terminating...${NC}"
+            9)
+                echo -e "${YELLOW}[!] Exiting menu. (Background workers will continue running if active)${NC}"
                 exit 0
                 ;;
             *)
