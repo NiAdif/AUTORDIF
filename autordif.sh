@@ -33,10 +33,10 @@ ROBLOX_PACKAGES=()
 declare -A PKG_STATUSES
 declare -A PKG_LAUNCH_TIMES
 
-# Force Close / Rejoin Settings
-FORCE_CLOSE_ENABLED="OFF"
-FORCE_CLOSE_INTERVAL=1800
-STUCK_TIMEOUT=30 # Dikurangi jadi 30 detik untuk respon cepat saat freeze
+# Force Close / Rejoin Settings (Set lalai ke ON untuk elakkan freeze selepas 2 jam)
+FORCE_CLOSE_ENABLED="ON"
+FORCE_CLOSE_INTERVAL=5400 # Auto-refresh setiap 1.5 jam secara automatik
+STUCK_TIMEOUT=30          # Masa untuk kesan skrin stuck/opening
 
 # Runtime Tracking Variables
 START_TIME=0
@@ -125,16 +125,16 @@ EOF
 }
 
 check_root_and_package() {
-    echo -e "${BLUE}[*] Memeriksa status Root...${NC}"
+    echo -e "${BLUE}[*] Semak status Root...${NC}"
     if su -c "id" >/dev/null 2>&1; then
         MODE_ROOT=true
-        echo -e "${GREEN}[+] Akses Root Diperoleh!${NC}"
+        echo -e "${GREEN}[+] Akses Root Dibenarkan!${NC}"
     else
         MODE_ROOT=false
-        echo -e "${YELLOW}[!] Akses Root Tidak Terdeteksi (Berjalan dalam mode Non-Root).${NC}"
+        echo -e "${YELLOW}[!] Akses Root Tidak Dikesan (Berjalan dalam mod Non-Root).${NC}"
     fi
 
-    echo -e "${BLUE}[*] Memindai semua paket berawalan 'com.roblox.'...${NC}"
+    echo -e "${BLUE}[*] Auto-scan semua pakej bermula 'com.roblox.'...${NC}"
     
     local scanned_pkgs=""
     if $MODE_ROOT; then
@@ -149,13 +149,13 @@ check_root_and_package() {
             [ -n "$pkg" ] && ROBLOX_PACKAGES+=("$pkg")
         done <<< "$scanned_pkgs"
         
-        echo -e "${GREEN}[+] Berhasil mendeteksi ${#ROBLOX_PACKAGES[@]} paket Roblox/Executor:${NC}"
+        echo -e "${GREEN}[+] Berjaya dikesan ${#ROBLOX_PACKAGES[@]} pakej Roblox/Executor:${NC}"
         for pkg in "${ROBLOX_PACKAGES[@]}"; do
             echo -e "    ${CYAN}- $pkg${NC}"
             set_pkg_status "$pkg" "STANDBY"
         done
     else
-        echo -e "${YELLOW}[!] Tidak ada paket com.roblox.* terdeteksi. Menggunakan default (com.roblox.client).${NC}"
+        echo -e "${YELLOW}[!] Tiada pakej com.roblox.* dikesan secara automatik. Menggunakan default (com.roblox.client).${NC}"
         ROBLOX_PACKAGES=("com.roblox.client")
         set_pkg_status "com.roblox.client" "STANDBY"
     fi
@@ -166,47 +166,47 @@ manage_packages_menu() {
     while true; do
         clear_screen
         echo -e "${CYAN}=== MULTI-PACKAGE MANAGER ===${NC}\n"
-        echo -e "Daftar Paket Saat Ini:"
+        echo -e "Senarai Pakej Semasa:"
         local idx=1
         for pkg in "${ROBLOX_PACKAGES[@]}"; do
             echo -e " ${YELLOW}[$idx]${NC} $pkg"
             ((idx++))
         done
         echo ""
-        echo -e "1) Pindai Ulang Paket (com.roblox.*)"
-        echo -e "2) Tambah Paket Secara Manual"
-        echo -e "3) Hapus Paket (Berdasarkan Nomor)"
+        echo -e "1) Auto-Scan Semula Pakej (com.roblox.*)"
+        echo -e "2) Tambah Pakej Secara Manual"
+        echo -e "3) Buang / Remove Pakej (ikut Nombor)"
         echo -e "4) Kembali"
         echo ""
-        read -p "Pilih opsi [1-4]: " m_opt
+        read -p "Pilih pilihan [1-4]: " m_opt
 
         case $m_opt in
             1) check_root_and_package ;;
             2)
-                read -p "Masukkan nama paket baru (contoh: com.roblox.delta): " new_p
+                read -p "Masukkan nama pakej baru (contoh: com.roblox.delta): " new_p
                 if [ -n "$new_p" ]; then
                     ROBLOX_PACKAGES+=("$new_p")
                     set_pkg_status "$new_p" "STANDBY"
-                    echo -e "${GREEN}[+] Paket berhasil ditambahkan!${NC}"
+                    echo -e "${GREEN}[+] Pakej berjaya ditambah!${NC}"
                 fi
                 sleep 1
                 ;;
             3)
-                read -p "Masukkan nomor paket yang ingin dihapus: " del_idx
+                read -p "Masukkan nombor pakej yang hendak dibuang: " del_idx
                 if [[ "$del_idx" =~ ^[0-9]+$ ]] && [ "$del_idx" -ge 1 ] && [ "$del_idx" -le "${#ROBLOX_PACKAGES[@]}" ]; then
                     local target_pkg="${ROBLOX_PACKAGES[del_idx-1]}"
                     unset 'ROBLOX_PACKAGES[del_idx-1]'
                     ROBLOX_PACKAGES=("${ROBLOX_PACKAGES[@]}")
                     unset 'PKG_STATUSES[$target_pkg]'
                     unset 'PKG_LAUNCH_TIMES[$target_pkg]'
-                    echo -e "${GREEN}[+] Paket $target_pkg berhasil dihapus!${NC}"
+                    echo -e "${GREEN}[+] Pakej $target_pkg berjaya dibuang!${NC}"
                 else
-                    echo -e "${RED}[!] Nomor tidak valid.${NC}"
+                    echo -e "${RED}[!] Nombor tidak sah.${NC}"
                 fi
                 sleep 1
                 ;;
             4) break ;;
-            *) echo -e "${RED}Pilihan tidak valid!${NC}"; sleep 1 ;;
+            *) echo -e "${RED}Pilihan tidak sah!${NC}"; sleep 1 ;;
         esac
     done
 }
@@ -216,20 +216,20 @@ apply_system_tweaks() {
     echo -e "${MAGENTA}=== AUTORDIF SYSTEM TWEAKER ===${NC}\n"
     
     if ! $MODE_ROOT; then
-        echo -e "${RED}[!] Error: Tweak sistem membutuhkan akses ROOT.${NC}"
+        echo -e "${RED}[!] Error: System tweaks memerlukan hak akses ROOT.${NC}"
         read -p "Tekan Enter untuk kembali..."
         return
     fi
 
-    echo -e "${CYAN}[1] Force Stop Aplikasi Latar Belakang${NC}"
-    echo -e "${CYAN}[2] Bersihkan Cache Memori (RAM Optimization)${NC}"
-    echo -e "${CYAN}[3] Terapkan Proteksi LMK untuk Semua Paket Roblox${NC}"
-    echo -e "${CYAN}[4] Kembali${NC}"
+    echo -e "${CYAN}[1] Force Stop Background Apps${NC}"
+    echo -e "${CYAN}[2] Clear Cache Memory (RAM Optimization)${NC}"
+    echo -e "${CYAN}[3] Apply LMK Protection untuk Semua Pakej Roblox${NC}"
+    echo -e "${CYAN}[4] Back${NC}"
     echo ""
-    read -p "Pilih opsi [1-4]: " tweak_opt
+    read -p "Pilih pilihan [1-4]: " tweak_opt
 
     case $tweak_opt in
-        1) su -c "am kill-all"; echo -e "${GREEN}[+] Aplikasi latar belakang dibersihkan.${NC}" ;;
+        1) su -c "am kill-all"; echo -e "${GREEN}[+] Background apps dibersihkan.${NC}" ;;
         2) su -c "sync; echo 3 > /proc/sys/vm/drop_caches"; echo -e "${GREEN}[+] Cache RAM dibersihkan.${NC}" ;;
         3)
             for pkg in "${ROBLOX_PACKAGES[@]}"; do
@@ -238,13 +238,13 @@ apply_system_tweaks() {
                     su -c "echo -17 > /proc/$pid/oom_adj"
                     echo -e "${GREEN}[+] Proses $pkg (PID $pid) dilindungi.${NC}"
                 else
-                    echo -e "${YELLOW}[!] Paket $pkg tidak aktif.${NC}"
+                    echo -e "${YELLOW}[!] Pakej $pkg tidak aktif.${NC}"
                 fi
             done
             sleep 2
             ;;
         4) return ;;
-        *) echo -e "${RED}Pilihan tidak valid!${NC}" ;;
+        *) echo -e "${RED}Pilihan tidak sah!${NC}" ;;
     esac
     sleep 2
 }
@@ -261,7 +261,7 @@ login_system() {
         echo ""
 
         if [ "$pass_input" == "$PASSWORD_REQ" ]; then
-            echo -e "${GREEN}[+] Akses Diterima! Selamat Datang ADIFLUQMAN.${NC}"
+            echo -e "${GREEN}[+] Akses Dibenarkan! Welcome ADIFLUQMAN.${NC}"
             sleep 1
             break
         else
@@ -288,9 +288,6 @@ select_executor() {
     esac
 }
 
-# ==========================================
-# HARD KILL PROCESS & RECONNECT
-# ==========================================
 kill_package_hard() {
     local pkg="$1"
     if $MODE_ROOT; then
@@ -326,7 +323,7 @@ launch_specific_pkg() {
     
     set_pkg_status "$pkg" "OPENING ROBLOX"
     PKG_LAUNCH_TIMES["$pkg"]=$(date +%s)
-    send_discord_log "Memulai ulang paket: $pkg"
+    send_discord_log "Membuka semula pakej: $pkg"
     
     if [ "$JOIN_MODE" == "GAME_ID" ]; then
         local launch_url="roblox://placeID=$GAME_ID"
@@ -344,7 +341,7 @@ launch_specific_pkg() {
 launch_all_packages() {
     set_status "RECONNECTING"
     START_TIME=$(date +%s)
-    send_discord_log "Menjalankan ulang seluruh ${#ROBLOX_PACKAGES[@]} paket."
+    send_discord_log "Melancarkan semula semua ${#ROBLOX_PACKAGES[@]} pakej."
     
     for pkg in "${ROBLOX_PACKAGES[@]}"; do
         set_pkg_status "$pkg" "RECONNECTING"
@@ -353,7 +350,7 @@ launch_all_packages() {
     done
 
     set_status "RUNNING"
-    send_discord_log "Semua paket berhasil dibuka kembali."
+    send_discord_log "Semua pakej berjaya dibuka semula."
 }
 
 background_monitor() {
@@ -366,12 +363,13 @@ background_monitor() {
         sleep "$CHECK_INTERVAL"
         local current_time=$(date +%s)
 
+        # Scheduled Auto-Refresh (Memutus isu freeze 2 jam secara automatik)
         if [ "$FORCE_CLOSE_ENABLED" == "ON" ]; then
             local time_diff=$((current_time - last_rejoin_time))
             if [ "$time_diff" -ge "$FORCE_CLOSE_INTERVAL" ]; then
                 set_status "FORCE CLOSING (STUCK)"
                 START_TIME=$(date +%s)
-                send_discord_log "Jadwal Force Close terpicu. Memulai ulang semua paket..."
+                send_discord_log "Jadual Force Close dipicu (Auto-refresh elak freeze). Membuka semula semua pakej..."
                 sleep 2
                 launch_all_packages
                 last_rejoin_time=$(date +%s)
@@ -385,15 +383,14 @@ background_monitor() {
         for pkg in "${ROBLOX_PACKAGES[@]}"; do
             if is_pkg_running "$pkg"; then
                 local current_p_stat="${PKG_STATUSES[$pkg]:-STANDBY}"
-                
-                # Cek jika proses stuck/freeze saat pembukaan
                 local launch_t="${PKG_LAUNCH_TIMES[$pkg]:-$current_time}"
                 local elapsed_launch=$((current_time - launch_t))
                 
+                # Semak jika pakej tersekat semasa opening/reconnecting
                 if [ "$elapsed_launch" -ge "$STUCK_TIMEOUT" ] && [ "$current_p_stat" != "RUNNING" ]; then
                     set_pkg_status "$pkg" "FREEZE/RE-OPEN"
                     START_TIME=$(date +%s)
-                    send_discord_log "FREEZE DETECTED pada paket $pkg! Melakukan force kill dan re-open..."
+                    send_discord_log "FREEZE DETECTED pada pakej $pkg! Force kill dan re-open..."
                     launch_specific_pkg "$pkg"
                     any_action_taken=true
                     continue
@@ -403,7 +400,7 @@ background_monitor() {
                 set_pkg_status "$pkg" "RUNNING"
             else
                 set_pkg_status "$pkg" "CRASHED"
-                send_discord_log "CRASH DETECTED pada paket: $pkg. Menghubungkan ulang paket ini..."
+                send_discord_log "CRASH DETECTED pada pakej: $pkg. Reconnecting pakej ini..."
                 launch_specific_pkg "$pkg"
                 any_action_taken=true
                 sleep 2
@@ -413,7 +410,7 @@ background_monitor() {
         if "$all_crashed"; then
             set_status "ALL CRASHED"
             START_TIME=$(date +%s)
-            send_discord_log "Semua paket mati! Membuka ulang seluruh paket..."
+            send_discord_log "Semua pakej mati! Membuka semula semua..."
             launch_all_packages
             last_rejoin_time=$(date +%s)
         elif ! "$any_action_taken"; then
@@ -424,19 +421,19 @@ background_monitor() {
 
 start_background_reconnect() {
     if [ "$AUTO_RECONNECT" == "OFF" ]; then
-        echo -e "${RED}[!] Aktifkan pengaturan Auto Reconnect terlebih dahulu! (Opsi 1)${NC}"
+        echo -e "${RED}[!] Sila aktifkan tetapan Auto Reconnect dulu! (Pilihan 1)${NC}"
         sleep 2
         return
     fi
 
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
-        echo -e "${YELLOW}[!] Auto Reconnect sudah berjalan di latar belakang!${NC}"
+        echo -e "${YELLOW}[!] Auto Reconnect sedang berjalan di background!${NC}"
         sleep 2
         return
     fi
 
     termux-wake-lock >/dev/null 2>&1
-    echo -e "${GREEN}[+] Memulai Multi-Account Auto Reconnect & Wake Lock...${NC}"
+    echo -e "${GREEN}[+] Memulakan Multi-Account Auto Reconnect & Wake Lock...${NC}"
     background_monitor &
     echo $! > "$PID_FILE"
     sleep 1
@@ -457,7 +454,7 @@ stop_background_reconnect() {
         set_pkg_status "$pkg" "CLOSED"
     done
     START_TIME=0
-    echo -e "${GREEN}[+] Auto Reconnect dihentikan & Wake Lock dilepas.${NC}"
+    echo -e "${GREEN}[+] Auto Reconnect dihentikan & Wake Lock dilepaskan.${NC}"
     sleep 1
 }
 
@@ -473,20 +470,20 @@ settings_menu() {
     while true; do
         clear_screen
         echo -e "${CYAN}=== AUTORDIF SETTINGS ===${NC}\n"
-        echo -e "1) Recheck Interval (Saat ini: ${YELLOW}${CHECK_INTERVAL}s${NC})"
-        echo -e "2) Kelola Multi-Packages (Total: ${YELLOW}$([[ ${#ROBLOX_PACKAGES[@]} ]] && echo ${#ROBLOX_PACKAGES[@]})${NC})"
-        echo -e "3) Toggle Scheduled Force Close [Saat ini: ${BOLD}${FORCE_CLOSE_ENABLED}${NC}]"
-        echo -e "4) Set Force Close Interval (Saat ini: ${YELLOW}${FORCE_CLOSE_INTERVAL}s${NC})"
-        echo -e "5) Set Freeze Timeout (Saat ini: ${YELLOW}${STUCK_TIMEOUT}s${NC})"
+        echo -e "1) Recheck Interval (Semasa: ${YELLOW}${CHECK_INTERVAL}s${NC})"
+        echo -e "2) Pengurusan Multi-Packages (Jumlah: ${YELLOW}$([[ ${#ROBLOX_PACKAGES[@]} ]] && echo ${#ROBLOX_PACKAGES[@]})${NC})"
+        echo -e "3) Toggle Scheduled Force Close [Semasa: ${BOLD}${FORCE_CLOSE_ENABLED}${NC}]"
+        echo -e "4) Set Force Close Interval (Semasa: ${YELLOW}${FORCE_CLOSE_INTERVAL}s${NC})"
+        echo -e "5) Set Freeze/Stuck Timeout (Semasa: ${YELLOW}${STUCK_TIMEOUT}s${NC})"
         echo -e "6) Manual Toggle Termux Wake Lock (ON/OFF)"
-        echo -e "7) Auto-Scan / Refresh Paket Roblox"
+        echo -e "7) Auto-Scan / Refresh Pakej Roblox"
         echo -e "8) Kembali ke Menu Utama"
         echo ""
-        read -p "Pilih opsi [1-8]: " set_opt
+        read -p "Pilih pilihan [1-8]: " set_opt
 
         case $set_opt in
             1)
-                read -p "Masukkan interval dalam detik: " new_int
+                read -p "Masukkan interval dalam saat: " new_int
                 [[ "$new_int" =~ ^[0-9]+$ ]] && CHECK_INTERVAL=$new_int
                 sleep 1
                 ;;
@@ -500,17 +497,17 @@ settings_menu() {
                 sleep 1
                 ;;
             4)
-                read -p "Masukkan Force Close Interval dalam detik: " fc_int
+                read -p "Masukkan Force Close Interval dalam saat (contoh 5400 untuk 1.5 jam): " fc_int
                 [[ "$fc_int" =~ ^[0-9]+$ ]] && FORCE_CLOSE_INTERVAL=$fc_int
                 sleep 1
                 ;;
             5)
-                read -p "Masukkan Freeze Timeout dalam detik (contoh: 30): " st_int
+                read -p "Masukkan Freeze Timeout dalam saat (contoh: 30): " st_int
                 [[ "$st_int" =~ ^[0-9]+$ ]] && STUCK_TIMEOUT=$st_int
                 sleep 1
                 ;;
             6)
-                echo -e "${CYAN}1) Nyalakan Wake Lock${NC}"
+                echo -e "${CYAN}1) Hidupkan Wake Lock${NC}"
                 echo -e "${CYAN}2) Matikan Wake Lock${NC}"
                 read -p "Pilihan [1-2]: " wl_choice
                 if [ "$wl_choice" == "1" ]; then
@@ -524,7 +521,7 @@ settings_menu() {
                 ;;
             7) check_root_and_package ;;
             8) break ;;
-            *) echo -e "${RED}Pilihan tidak valid!${NC}"; sleep 1 ;;
+            *) echo -e "${RED}Pilihan tidak sah!${NC}"; sleep 1 ;;
         esac
     done
 }
@@ -579,7 +576,7 @@ main_menu() {
         done
         echo -e "${YELLOW}${BOLD}└───────────────────────────────────────────────────┘${NC}\n"
 
-        echo -e " [1] Toggle Auto Reconnect [Saat ini: ${BOLD}${AUTO_RECONNECT}${NC}]"
+        echo -e " [1] Toggle Auto Reconnect [Semasa: ${BOLD}${AUTO_RECONNECT}${NC}]"
         echo -e " [2] Configure Server Setup [Mode: ${YELLOW}${JOIN_MODE}${NC}]"
         echo -e " [3] Configure Discord Webhook"
         echo -e " [4] System Settings (Interval, Multi-Packages, Auto-Scan)"
@@ -625,7 +622,7 @@ main_menu() {
                 echo -e "${CYAN}=== DISCORD WEBHOOK SETUP ===${NC}"
                 read -p "Paste Webhook URL: " wh_url
                 DISCORD_WEBHOOK="$wh_url"
-                echo -e "${GREEN}[+] Webhook tersimpan!${NC}"
+                echo -e "${GREEN}[+] Webhook disimpan!${NC}"
                 send_discord_log "AUTORDIF Multi-Account Webhook Active!"
                 sleep 2
                 ;;
@@ -642,7 +639,7 @@ main_menu() {
                 exit 0
                 ;;
             *)
-                echo -e "${RED}Pilihan tidak valid!${NC}"
+                echo -e "${RED}Pilihan tidak sah!${NC}"
                 sleep 1
                 ;;
         esac
