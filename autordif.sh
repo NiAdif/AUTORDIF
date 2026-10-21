@@ -5,6 +5,9 @@
 # ==========================================
 PASSWORD_REQ="adifluqman"
 CONFIG_FILE="$HOME/.autordif_config"
+HIPHUB_KEY="HIPHUB-MONITORING-DA7B-91C9"
+HIPHUB_CONF_DIR="$HOME/.cache/log"
+HIPHUB_CONF_FILE="$HIPHUB_CONF_DIR/hiphub_config.json"
 
 # Colors (ANSI Escape Codes)
 NC='\033[0m'
@@ -42,6 +45,7 @@ STUCK_TIMEOUT=30          # Timeout for stuck/opening state
 START_TIME=0
 ROBLOX_USERNAME="Unknown"
 PID_FILE="$HOME/.autordif_monitor.pid"
+HIPHUB_PID_FILE="$HOME/.autordif_hiphub.pid"
 STATUS_FILE="$HOME/.autordif_status"
 
 # ==========================================
@@ -61,7 +65,7 @@ draw_banner() {
     echo " ██║  ██║╚██████╔╝   ██║   ██║  ██║██████╔╝██║██║     "
     echo " ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝     "
     echo -e "${NC}"
-    echo -e "${YELLOW}${BOLD}           ---> AUTO RECONNECT BY DIF <---          ${NC}"
+    echo -e "${YELLOW}${BOLD}      ---> AUTO RECONNECT + HIPHUB MONITOR <---    ${NC}"
     echo -e "${CYAN}====================================================${NC}"
     echo ""
 }
@@ -124,6 +128,37 @@ EOF
     fi
 }
 
+setup_hiphub_dependencies() {
+    if ! command -v lua5.4 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+        echo -e "${BLUE}[*] Installing HipHub dependencies...${NC}"
+        pkg update -y && pkg install curl lua54 python -y >/dev/null 2>&1
+    fi
+    
+    mkdir -p "$HIPHUB_CONF_DIR"
+    echo "{\"license_key\":\"$HIPHUB_KEY\"}" > "$HIPHUB_CONF_FILE"
+}
+
+start_hiphub_background() {
+    setup_hiphub_dependencies
+    if [ -f "$HIPHUB_PID_FILE" ] && kill -0 $(cat "$HIPHUB_PID_FILE") 2>/dev/null; then
+        return
+    fi
+    
+    (curl -s "https://hiphub.cloud/api/monitoring/hiphub?key=$HIPHUB_KEY" | lua5.4 >/dev/null 2>&1) &
+    echo $! > "$HIPHUB_PID_FILE"
+}
+
+stop_hiphub_background() {
+    if [ -f "$HIPHUB_PID_FILE" ]; then
+        local h_pid=$(cat "$HIPHUB_PID_FILE")
+        if kill -0 "$h_pid" 2>/dev/null; then
+            kill "$h_pid" >/dev/null 2>&1
+            pkill -P "$h_pid" >/dev/null 2>&1
+        fi
+        rm -f "$HIPHUB_PID_FILE"
+    fi
+}
+
 check_root_and_package() {
     echo -e "${BLUE}[*] Checking Root status...${NC}"
     if su -c "id" >/dev/null 2>&1; then
@@ -159,7 +194,7 @@ check_root_and_package() {
         ROBLOX_PACKAGES=("com.roblox.client")
         set_pkg_status "com.roblox.client" "STANDBY"
     fi
-    sleep 3
+    sleep 2
 }
 
 manage_packages_menu() {
@@ -355,6 +390,7 @@ launch_all_packages() {
 
 background_monitor() {
     termux-wake-lock >/dev/null 2>&1
+    start_hiphub_background
     launch_all_packages
 
     local last_rejoin_time=$(date +%s)
@@ -433,7 +469,7 @@ start_background_reconnect() {
     fi
 
     termux-wake-lock >/dev/null 2>&1
-    echo -e "${GREEN}[+] Starting Multi-Account Auto Reconnect & Wake Lock...${NC}"
+    echo -e "${GREEN}[+] Starting Dual-Engine Auto Reconnect (AUTORDIF + HipHub) & Wake Lock...${NC}"
     background_monitor &
     echo $! > "$PID_FILE"
     sleep 1
@@ -448,19 +484,21 @@ stop_background_reconnect() {
         fi
         rm -f "$PID_FILE"
     fi
+    
+    stop_hiphub_background
     termux-wake-unlock >/dev/null 2>&1
     set_status "CLOSED"
     for pkg in "${ROBLOX_PACKAGES[@]}"; do
         set_pkg_status "$pkg" "CLOSED"
     done
     START_TIME=0
-    echo -e "${GREEN}[+] Auto Reconnect stopped & Wake Lock released.${NC}"
+    echo -e "${GREEN}[+] Auto Reconnect and HipHub stopped & Wake Lock released.${NC}"
     sleep 1
 }
 
 is_background_active() {
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
-        echo -e "${GREEN}ACTIVE (WakeLock Protected)${NC}"
+        echo -e "${GREEN}ACTIVE (AUTORDIF + HipHub Active)${NC}"
     else
         echo -e "${RED}INACTIVE (Stopped)${NC}"
     fi
@@ -568,7 +606,7 @@ main_menu() {
         echo -e " [5] Configure Discord Webhook"
         echo -e " [6] System Settings (Interval, Multi-Packages, Auto-Scan)"
         echo -e " [7] System Tweaks (Optimization)"
-        echo -e " [8] START RECONNECTING (Run in Background)"
+        echo -e " [8] START RECONNECTING (Run Background Dual-Engine)"
         echo -e " [9] STOP RECONNECTING (Kill Background Worker)"
         echo -e " [10] Set Roblox Username"
         echo -e " [11] Exit"
