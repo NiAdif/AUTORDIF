@@ -24,17 +24,22 @@ GRAY='\033[0;90m'
 # Default States
 SELECTED_EXECUTOR=""
 AUTO_RECONNECT="OFF"
-JOIN_MODE="GAME_ID"
-GAME_ID="1537690962"
-SERVER_LINK=""
 DISCORD_WEBHOOK=""
 CHECK_INTERVAL=15
 MODE_ROOT=false
 
-# Multi-Package List & Status Tracking Array
+# Multi-Package List & Tracking Arrays
 ROBLOX_PACKAGES=()
 declare -A PKG_STATUSES
 declare -A PKG_LAUNCH_TIMES
+
+# Per-Package Server Settings (Associative Arrays)
+declare -A PKG_JOIN_MODES
+declare -A PKG_GAME_IDS
+declare -A PKG_SERVER_LINKS
+
+# Default Global Fallbacks
+DEFAULT_GAME_ID="1537690962"
 
 # Force Close / Rejoin Settings
 FORCE_CLOSE_ENABLED="ON"
@@ -181,20 +186,103 @@ check_root_and_package() {
     if [ -n "$scanned_pkgs" ]; then
         ROBLOX_PACKAGES=()
         while IFS= read -r pkg; do
-            [ -n "$pkg" ] && ROBLOX_PACKAGES+=("$pkg")
+            if [ -n "$pkg" ]; then
+                ROBLOX_PACKAGES+=("$pkg")
+                set_pkg_status "$pkg" "STANDBY"
+                [ -z "${PKG_JOIN_MODES[$pkg]}" ] && PKG_JOIN_MODES["$pkg"]="GAME_ID"
+                [ -z "${PKG_GAME_IDS[$pkg]}" ] && PKG_GAME_IDS["$pkg"]="$DEFAULT_GAME_ID"
+            fi
         done <<< "$scanned_pkgs"
         
         echo -e "${GREEN}[+] Successfully detected ${#ROBLOX_PACKAGES[@]} Roblox/Executor package(s):${NC}"
         for pkg in "${ROBLOX_PACKAGES[@]}"; do
             echo -e "    ${CYAN}- $pkg${NC}"
-            set_pkg_status "$pkg" "STANDBY"
         done
     else
         echo -e "${YELLOW}[!] No com.roblox.* packages automatically detected. Using default (com.roblox.client).${NC}"
         ROBLOX_PACKAGES=("com.roblox.client")
         set_pkg_status "com.roblox.client" "STANDBY"
+        PKG_JOIN_MODES["com.roblox.client"]="GAME_ID"
+        PKG_GAME_IDS["com.roblox.client"]="$DEFAULT_GAME_ID"
     fi
     sleep 2
+}
+
+configure_package_server() {
+    while true; do
+        clear_screen
+        echo -e "${CYAN}=== PER-PACKAGE SERVER CONFIGURATION ===${NC}\n"
+        echo -e "Current Package Server Configurations:"
+        local idx=1
+        for pkg in "${ROBLOX_PACKAGES[@]}"; do
+            local mode="${PKG_JOIN_MODES[$pkg]:-GAME_ID}"
+            local target=""
+            if [ "$mode" == "GAME_ID" ]; then
+                target="Game ID: ${PKG_GAME_IDS[$pkg]:-$DEFAULT_GAME_ID}"
+            else
+                target="VIP Link: ${PKG_SERVER_LINKS[$pkg]:-Not Set}"
+            fi
+            echo -e " ${YELLOW}[$idx]${NC} ${CYAN}$pkg${NC} -> Mode: ${MAGENTA}$mode${NC} | $target"
+            ((idx++))
+        done
+        echo ""
+        echo -e "1) Configure Specific Package"
+        echo -e "2) Apply Same Game ID to ALL Packages"
+        echo -e "3) Apply Same Private Server Link to ALL Packages"
+        echo -e "4) Back"
+        echo ""
+        read -p "Select option [1-4]: " cfg_opt
+
+        case $cfg_opt in
+            1)
+                read -p "Enter package number to configure [1-${#ROBLOX_PACKAGES[@]}]: " p_num
+                if [[ "$p_num" =~ ^[0-9]+$ ]] && [ "$p_num" -ge 1 ] && [ "$p_num" -le "${#ROBLOX_PACKAGES[@]}" ]; then
+                    local selected_pkg="${ROBLOX_PACKAGES[p_num-1]}"
+                    echo -e "\n${YELLOW}Configuring package: $selected_pkg${NC}"
+                    echo "1) Game ID (Public Server)"
+                    echo "2) Private Server Link"
+                    read -p "Select Mode [1-2]: " mode_choice
+                    if [ "$mode_choice" == "1" ]; then
+                        PKG_JOIN_MODES["$selected_pkg"]="GAME_ID"
+                        read -p "Enter Game ID for $selected_pkg: " g_id
+                        [ -n "$g_id" ] && PKG_GAME_IDS["$selected_pkg"]="$g_id"
+                    elif [ "$mode_choice" == "2" ]; then
+                        PKG_JOIN_MODES["$selected_pkg"]="PRIVATE_SERVER"
+                        read -p "Enter VIP/Deep Link for $selected_pkg: " p_link
+                        [ -n "$p_link" ] && PKG_SERVER_LINKS["$selected_pkg"]="$p_link"
+                    fi
+                    echo -e "${GREEN}[+] Server updated for $selected_pkg!${NC}"
+                else
+                    echo -e "${RED}[!] Invalid package number.${NC}"
+                fi
+                sleep 2
+                ;;
+            2)
+                read -p "Enter Game ID for ALL packages: " all_gid
+                if [ -n "$all_gid" ]; then
+                    for pkg in "${ROBLOX_PACKAGES[@]}"; do
+                        PKG_JOIN_MODES["$pkg"]="GAME_ID"
+                        PKG_GAME_IDS["$pkg"]="$all_gid"
+                    done
+                    echo -e "${GREEN}[+] Game ID set to $all_gid for all packages!${NC}"
+                fi
+                sleep 2
+                ;;
+            3)
+                read -p "Enter VIP/Deep Link for ALL packages: " all_link
+                if [ -n "$all_link" ]; then
+                    for pkg in "${ROBLOX_PACKAGES[@]}"; do
+                        PKG_JOIN_MODES["$pkg"]="PRIVATE_SERVER"
+                        PKG_SERVER_LINKS["$pkg"]="$all_link"
+                    done
+                    echo -e "${GREEN}[+] VIP Link applied to all packages!${NC}"
+                fi
+                sleep 2
+                ;;
+            4) break ;;
+            *) echo -e "${RED}Invalid selection!${NC}"; sleep 1 ;;
+        esac
+    done
 }
 
 manage_packages_menu() {
@@ -222,7 +310,9 @@ manage_packages_menu() {
                 if [ -n "$new_p" ]; then
                     ROBLOX_PACKAGES+=("$new_p")
                     set_pkg_status "$new_p" "STANDBY"
-                    echo -e "${GREEN}[+] Package successfully added!${NC}"
+                    PKG_JOIN_MODES["$new_p"]="GAME_ID"
+                    PKG_GAME_IDS["$new_p"]="$DEFAULT_GAME_ID"
+                    echo -e "${GREEN}[+] Package $new_p successfully added!${NC}"
                 fi
                 sleep 1
                 ;;
@@ -234,6 +324,9 @@ manage_packages_menu() {
                     ROBLOX_PACKAGES=("${ROBLOX_PACKAGES[@]}")
                     unset 'PKG_STATUSES[$target_pkg]'
                     unset 'PKG_LAUNCH_TIMES[$target_pkg]'
+                    unset 'PKG_JOIN_MODES[$target_pkg]'
+                    unset 'PKG_GAME_IDS[$target_pkg]'
+                    unset 'PKG_SERVER_LINKS[$target_pkg]'
                     echo -e "${GREEN}[+] Package $target_pkg removed!${NC}"
                 else
                     echo -e "${RED}[!] Invalid selection.${NC}"
@@ -358,12 +451,17 @@ launch_specific_pkg() {
     
     set_pkg_status "$pkg" "OPENING ROBLOX"
     PKG_LAUNCH_TIMES["$pkg"]=$(date +%s)
-    send_discord_log "Relaunching package: $pkg"
     
-    if [ "$JOIN_MODE" == "GAME_ID" ]; then
-        local launch_url="roblox://placeID=$GAME_ID"
+    local mode="${PKG_JOIN_MODES[$pkg]:-GAME_ID}"
+    local launch_url=""
+    
+    if [ "$mode" == "GAME_ID" ]; then
+        local gid="${PKG_GAME_IDS[$pkg]:-$DEFAULT_GAME_ID}"
+        launch_url="roblox://placeID=$gid"
+        send_discord_log "Relaunching package: $pkg (Game ID: $gid)"
     else
-        local launch_url="$SERVER_LINK"
+        launch_url="${PKG_SERVER_LINKS[$pkg]}"
+        send_discord_log "Relaunching package: $pkg (Private Server Link)"
     fi
 
     if $MODE_ROOT; then
@@ -589,20 +687,27 @@ main_menu() {
         echo -e "${YELLOW}${BOLD}┌──────────────── LIVE PACKAGE STATUS ──────────────┐${NC}"
         for pkg in "${ROBLOX_PACKAGES[@]}"; do
             local p_stat="${PKG_STATUSES[$pkg]:-STANDBY}"
+            local p_mode="${PKG_JOIN_MODES[$pkg]:-GAME_ID}"
+            local target_info=""
+            if [ "$p_mode" == "GAME_ID" ]; then
+                target_info="[GID: ${PKG_GAME_IDS[$pkg]:-$DEFAULT_GAME_ID}]"
+            else
+                target_info="[VIP Server]"
+            fi
             local color_stat="${GREEN}"
             if [ "$p_stat" == "CRASHED" ] || [[ "$p_stat" == *"FREEZE"* ]]; then
                 color_stat="${RED}"
             elif [ "$p_stat" == "RECONNECTING" ] || [ "$p_stat" == "OPENING ROBLOX" ]; then
                 color_stat="${YELLOW}"
             fi
-            printf "${YELLOW}│${NC} %-30s : ${color_stat}%-14s${NC} ${YELLOW}│${NC}\n" "$pkg" "$p_stat"
+            printf "${YELLOW}│${NC} %-23s %-12s : ${color_stat}%-11s${NC} ${YELLOW}│${NC}\n" "${pkg:0:23}" "$target_info" "$p_stat"
         done
         echo -e "${YELLOW}${BOLD}└───────────────────────────────────────────────────┘${NC}\n"
 
         echo -e " [1] Toggle Auto Reconnect [Current: ${BOLD}${AUTO_RECONNECT}${NC}]"
         echo -e " [2] Toggle Scheduled Force Close [Current: ${BOLD}${FORCE_CLOSE_ENABLED}${NC}]"
         echo -e " [3] Set Force Close Interval (Current: ${YELLOW}${FORCE_CLOSE_INTERVAL}s${NC})"
-        echo -e " [4] Configure Server Setup [Mode: ${YELLOW}${JOIN_MODE}${NC}]"
+        echo -e " [4] Configure Per-Package Server Setup"
         echo -e " [5] Configure Discord Webhook"
         echo -e " [6] System Settings (Interval, Multi-Packages, Auto-Scan)"
         echo -e " [7] System Tweaks (Optimization)"
@@ -650,22 +755,7 @@ main_menu() {
                 fi
                 sleep 2
                 ;;
-            4)
-                clear_screen
-                echo -e "${CYAN}=== SERVER SETUP ===${NC}"
-                echo "1) Game ID (Public Server)"
-                echo "2) Private Server Link"
-                read -p "Select [1-2]: " s_opt
-                if [ "$s_opt" == "1" ]; then
-                    JOIN_MODE="GAME_ID"
-                    read -p "Enter Game ID (Default Bee Swarm 1537690962): " g_id
-                    [ -n "$g_id" ] && GAME_ID="$g_id"
-                elif [ "$s_opt" == "2" ]; then
-                    JOIN_MODE="PRIVATE_SERVER"
-                    read -p "Enter Private Server VIP/Deep Link: " p_link
-                    [ -n "$p_link" ] && SERVER_LINK="$p_link"
-                fi
-                ;;
+            4) configure_package_server ;;
             5)
                 clear_screen
                 echo -e "${CYAN}=== DISCORD WEBHOOK SETUP ===${NC}"
